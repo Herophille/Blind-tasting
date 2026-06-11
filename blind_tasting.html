@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Dégustation à l'aveugle</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#FAF7F2;
+  --bg2:#F2ECE1;
+  --bg3:#E8DECE;
+  --amber:#9E6510;
+  --amber-light:#B8780E;
+  --amber-dim:#D4A862;
+  --text:#1A1410;
+  --text2:#6B5640;
+  --text3:#A8927A;
+  --border:#DDD0BE;
+  --border2:#C8B49A;
+  --success:#2A6E42;
+  --danger:#8C2E2E;
+  --radius:12px;
+  --radius-sm:8px;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:16px;line-height:1.5}
+#root{min-height:100%;display:flex;flex-direction:column}
+h1,h2,h3,.display{font-family:'Playfair Display',serif}
+button{cursor:pointer;font-family:'Inter',sans-serif}
+input,select,textarea{font-family:'Inter',sans-serif}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+const { useState, useEffect, useCallback, useMemo } = React;
+
+// ─── DATA ───────────────────────────────────────────────────────────────────
+
+const SPIRIT_DATA = {
+  "Armagnac": {
+    appellations: ["Bas-Armagnac","Ténarèze","Haut-Armagnac","Multi-crus"]
+  },
+  "Calvados": {
+    appellations: ["Calvados AOC","Pays d'Auge","Domfrontais"]
+  },
+  "Cognac": {
+    appellations: ["Grande Champagne","Petite Champagne","Fine Champagne","Borderies","Fins Bois","Bons Bois","Bois Ordinaires","Multi-crus"]
+  },
+  "Eau de vie de fruit": {
+    appellations: ["Abricot","Cerise","Framboise","Pêche","Poire","Prune","Autres"]
+  },
+  "Rhum": {
+    appellations: null, // special case
+    territories: ["Martinique","Guadeloupe","Marie-Galante","La Réunion","Barbade","Cuba","Jamaïque","Haïti","Trinidad","Panama","Guatemala","Nicaragua","Porto Rico","République Dominicaine","Autres"],
+    matieres: ["Agricole (jus de canne)","Mélasse"]
+  },
+  "Whisky": {
+    appellations: ["Campbeltown","Highland","Islay","Lowlands","Speyside","France","Irlande","Japon","USA","Monde","Blend"]
+  },
+  "Mezcal": {
+    appellations: ["Joven","Reposado","Añejo","Pechuga","Tequila"]
+  },
+  "Autres eau de vie": {
+    appellations: ["À base de canne à sucre","Cidre","Fine","Marc","Vin","Autres"]
+  }
+};
+
+const TYPES = Object.keys(SPIRIT_DATA);
+
+// ─── API ─────────────────────────────────────────────────────────────────────
+
+function api(path, opts) {
+  return fetch(path, opts).then(r => r.json()).catch(() => null);
+}
+
+// ─── SCORING ────────────────────────────────────────────────────────────────
+
+function scoreType(correct, answer) {
+  return answer === correct ? 10 : 0;
+}
+function scoreAppellation(correct, answer) {
+  if (!correct || !answer) return 0;
+  return answer === correct ? 20 : 0;
+}
+function scoreTitrage(correct, answer) {
+  if (answer === '' || answer === null || isNaN(answer)) return 0;
+  const ecart = Math.abs(parseFloat(correct) - parseFloat(answer));
+  const score = (5 - ecart) * 4;
+  return Math.max(0, Math.min(20, Math.round(score)));
+}
+function scoreAge(correct, answer) {
+  if (answer === '' || answer === null || isNaN(answer)) return 0;
+  const ecart = Math.abs(parseInt(correct) - parseInt(answer));
+  let score = 1.2 * (10 - ecart);
+  if (ecart === 0) score += 3;
+  return Math.max(0, Math.min(15, Math.round(score * 10) / 10));
+}
+
+// ─── STYLES ─────────────────────────────────────────────────────────────────
+
+const S = {
+  app: {minHeight:'100vh',display:'flex',flexDirection:'column'},
+  nav: {background:'var(--bg2)',borderBottom:'1px solid var(--border)',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:100},
+  navTitle: {fontFamily:'Playfair Display, serif',fontSize:'18px',color:'var(--amber)',letterSpacing:'0.02em'},
+  navBtn: {background:'none',border:'1px solid var(--border2)',color:'var(--text2)',borderRadius:'6px',padding:'6px 12px',fontSize:'12px',letterSpacing:'0.05em'},
+  page: {flex:1,padding:'20px',maxWidth:'480px',margin:'0 auto',width:'100%'},
+  pageWide: {flex:1,padding:'20px',maxWidth:'800px',margin:'0 auto',width:'100%'},
+  card: {background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'20px',marginBottom:'16px'},
+  cardAmber: {background:'var(--bg2)',border:'1px solid var(--amber-dim)',borderRadius:'var(--radius)',padding:'20px',marginBottom:'16px'},
+  label: {display:'block',fontSize:'12px',color:'var(--text2)',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:'8px'},
+  input: {width:'100%',background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:'var(--radius-sm)',color:'var(--text)',padding:'12px 14px',fontSize:'15px',outline:'none'},
+  select: {width:'100%',background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:'var(--radius-sm)',color:'var(--text)',padding:'12px 14px',fontSize:'15px',outline:'none',appearance:'none'},
+  row: {marginBottom:'18px'},
+  btnPrimary: {width:'100%',background:'var(--amber)',color:'#FFFFFF',border:'none',borderRadius:'var(--radius-sm)',padding:'14px',fontSize:'15px',fontWeight:600,letterSpacing:'0.03em'},
+  btnSecondary: {width:'100%',background:'none',color:'var(--text2)',border:'1px solid var(--border2)',borderRadius:'var(--radius-sm)',padding:'12px',fontSize:'14px'},
+  btnDanger: {background:'none',color:'#8C3A3A',border:'1px solid #8C3A3A',borderRadius:'var(--radius-sm)',padding:'8px 14px',fontSize:'13px'},
+  pillRow: {display:'flex',flexWrap:'wrap',gap:'8px'},
+  pill: (active) => ({
+    padding:'8px 14px',borderRadius:'20px',fontSize:'13px',fontWeight:500,cursor:'pointer',
+    background: active ? 'var(--amber)' : 'var(--bg3)',
+    color: active ? '#FFFFFF' : 'var(--text2)',
+    border: active ? '1px solid var(--amber)' : '1px solid var(--border2)',
+  }),
+  scoreBar: {height:'6px',borderRadius:'3px',background:'var(--border)',overflow:'hidden',marginTop:'6px'},
+  scoreBarFill: (pct,correct) => ({
+    height:'100%',
+    width: pct+'%',
+    background: correct ? 'var(--success)' : pct > 50 ? 'var(--amber)' : 'var(--danger)',
+    transition:'width 1s ease',borderRadius:'3px'
+  }),
+  watermark: {
+    position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',
+    fontFamily:'Playfair Display, serif',fontSize:'160px',fontWeight:700,
+    color:'rgba(120,80,10,0.07)',userSelect:'none',pointerEvents:'none',lineHeight:1,
+    whiteSpace:'nowrap'
+  },
+  tag: (ok) => ({
+    display:'inline-block',padding:'3px 10px',borderRadius:'12px',fontSize:'12px',fontWeight:500,
+    background: ok ? 'rgba(42,110,66,0.1)' : 'rgba(140,46,46,0.1)',
+    color: ok ? '#2A6E42' : '#8C2E2E',
+    border: `1px solid ${ok ? 'rgba(42,110,66,0.25)' : 'rgba(140,46,46,0.25)'}`,
+  })
+};
+
+// ─── COMPONENTS ─────────────────────────────────────────────────────────────
+
+function Logo() {
+  return React.createElement('span', {style:S.navTitle}, '◈ Blind Tasting');
+}
+
+function PillPicker({options, value, onChange}) {
+  return React.createElement('div', {style:S.pillRow},
+    options.map(opt =>
+      React.createElement('button', {
+        key:opt,
+        style:S.pill(value===opt),
+        onClick:()=>onChange(opt)
+      }, opt)
+    )
+  );
+}
+
+function ScoreReveal({label, pts, max, correct, tasterVal, show}) {
+  const [animated, setAnimated] = useState(false);
+  useEffect(()=>{if(show) setTimeout(()=>setAnimated(true),100);},[show]);
+  const pct = max>0 ? (pts/max)*100 : 0;
+  return React.createElement('div', {style:{marginBottom:'16px'}},
+    React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}},
+      React.createElement('span', {style:{fontSize:'13px',color:'var(--text2)'}}, label),
+      React.createElement('span', {style:{fontSize:'14px',fontWeight:600,color:pts===max?'var(--amber)':'var(--text)'}}, `${pts} / ${max} pts`)
+    ),
+    React.createElement('div', {style:S.scoreBar},
+      React.createElement('div', {style:S.scoreBarFill(animated?pct:0, pts===max)})
+    ),
+    tasterVal !== undefined && React.createElement('div', {style:{display:'flex',justifyContent:'space-between',fontSize:'12px',color:'var(--text3)',marginTop:'4px'}},
+      React.createElement('span', null, `Réponse : ${tasterVal || '—'}`),
+      React.createElement('span', null, `Correct : ${correct || '—'}`)
+    )
+  );
+}
+
+// ─── VIEWS ──────────────────────────────────────────────────────────────────
+
+// HOME
+function HomeView({onGo}) {
+  return React.createElement('div', {style:{...S.page,display:'flex',flexDirection:'column',justifyContent:'center',minHeight:'80vh'}},
+    React.createElement('div', {style:{textAlign:'center',marginBottom:'48px'}},
+      React.createElement('h1', {style:{fontFamily:'Playfair Display, serif',fontSize:'38px',color:'var(--amber)',lineHeight:1.1,marginBottom:'12px'}}, 'Blind\nTasting'),
+      React.createElement('p', {style:{color:'var(--text2)',fontSize:'15px'}}, 'Entraînement à la dégustation à l\'aveugle de spiritueux')
+    ),
+    React.createElement('button', {style:{...S.btnPrimary,marginBottom:'12px'},onClick:()=>onGo('admin')}, '⚙ Espace admin'),
+    React.createElement('button', {style:S.btnSecondary, onClick:()=>onGo('join')}, '🥃 Rejoindre une session')
+  );
+}
+
+// JOIN SESSION
+function JoinView({sessions, onJoin, onBack}) {
+  const [name, setName] = useState('');
+  const [sessionId, setSessionId] = useState('');
+  const activeSessions = sessions.filter(s=>s.glasses && s.glasses.length>0);
+
+  return React.createElement('div', {style:S.page},
+    React.createElement('div', {style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'24px'}},
+      React.createElement('button', {style:{...S.navBtn,border:'none'},onClick:onBack}, '← Retour'),
+      React.createElement('h2', {style:{fontFamily:'Playfair Display,serif',fontSize:'22px'}}, 'Rejoindre')
+    ),
+    React.createElement('div', {style:S.card},
+      React.createElement('div', {style:S.row},
+        React.createElement('label', {style:S.label}, 'Votre nom'),
+        React.createElement('input', {style:S.input,value:name,onChange:e=>setName(e.target.value),placeholder:'Ex : Alice'})
+      ),
+      activeSessions.length > 0 && React.createElement('div', {style:S.row},
+        React.createElement('label', {style:S.label}, 'Session'),
+        React.createElement('select', {style:S.select,value:sessionId,onChange:e=>setSessionId(e.target.value)},
+          React.createElement('option', {value:''}, 'Choisir une session…'),
+          activeSessions.map(s=>React.createElement('option',{key:s.id,value:s.id}, s.name))
+        )
+      ),
+      activeSessions.length === 0 && React.createElement('p', {style:{color:'var(--text3)',fontSize:'14px',marginBottom:'16px'}}, 'Aucune session disponible. Demandez à l\'admin d\'en créer une.'),
+      React.createElement('button', {
+        style:{...S.btnPrimary,opacity:(!name||!sessionId)?0.4:1},
+        disabled:!name||!sessionId,
+        onClick:()=>onJoin(sessionId, name)
+      }, 'Commencer →')
+    )
+  );
+}
+
+// ADMIN HOME
+function AdminView({sessions, onNewSession, onOpenSession, onBack}) {
+  return React.createElement('div', {style:S.page},
+    React.createElement('div', {style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'24px'}},
+      React.createElement('button', {style:{...S.navBtn,border:'none'},onClick:onBack}, '← Retour'),
+      React.createElement('h2', {style:{fontFamily:'Playfair Display,serif',fontSize:'22px'}}, 'Admin')
+    ),
+    React.createElement('button', {style:{...S.btnPrimary,marginBottom:'24px'},onClick:onNewSession}, '+ Nouvelle session'),
+    sessions.length === 0 && React.createElement('p', {style:{color:'var(--text3)',textAlign:'center',fontSize:'14px',marginTop:'40px'}}, 'Aucune session créée.'),
+    sessions.map(s=>
+      React.createElement('div', {key:s.id,style:{...S.card,cursor:'pointer'},onClick:()=>onOpenSession(s.id)},
+        React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          React.createElement('div', null,
+            React.createElement('div', {style:{fontFamily:'Playfair Display,serif',fontSize:'16px',marginBottom:'4px'}}, s.name),
+            React.createElement('div', {style:{fontSize:'12px',color:'var(--text2)'}}, `${s.glasses?.length||0} verre${(s.glasses?.length||0)!==1?'s':''} · ${s.responses?.length||0} dégustateur${(s.responses?.length||0)!==1?'s':''}`)
+          ),
+          React.createElement('span', {style:{color:'var(--text3)',fontSize:'20px'}}, '›')
+        )
+      )
+    )
+  );
+}
+
+// CREATE SESSION
+function CreateSessionView({onSave, onBack}) {
+  const [name, setName] = useState('');
+  const [epreuve, setEpreuve] = useState('');
+  const [set, setSet] = useState('');
+  const [glasses, setGlasses] = useState([makeGlass(1)]);
+
+  function makeGlass(n) {
+    return {id:n,type:'',appellation:'',rhum_territory:'',rhum_matiere:'',titrage:'',age:'',producteur:'',reference:''};
+  }
+
+  function addGlass() {
+    setGlasses(g=>[...g, makeGlass(g.length+1)]);
+  }
+  function removeGlass(idx) {
+    setGlasses(g=>g.filter((_,i)=>i!==idx).map((x,i)=>({...x,id:i+1})));
+  }
+  function updateGlass(idx, field, val) {
+    setGlasses(g=>g.map((x,i)=>{
+      if(i!==idx) return x;
+      const updated = {...x,[field]:val};
+      if(field==='type'){updated.appellation='';updated.rhum_territory='';updated.rhum_matiere='';}
+      return updated;
+    }));
+  }
+
+  function save() {
+    const session = {
+      id: Date.now().toString(),
+      name: name || `Session ${new Date().toLocaleDateString('fr-FR')}`,
+      epreuve, set, glasses,
+      responses:[], createdAt: Date.now()
+    };
+    onSave(session);
+  }
+
+  return React.createElement('div', {style:S.page},
+    React.createElement('div', {style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'24px'}},
+      React.createElement('button', {style:{...S.navBtn,border:'none'},onClick:onBack}, '← Retour'),
+      React.createElement('h2', {style:{fontFamily:'Playfair Display,serif',fontSize:'22px'}}, 'Nouvelle session')
+    ),
+
+    React.createElement('div', {style:S.card},
+      React.createElement('div', {style:S.row},
+        React.createElement('label', {style:S.label}, 'Nom de la session'),
+        React.createElement('input', {style:S.input,value:name,onChange:e=>setName(e.target.value),placeholder:'Ex : Soirée whisky #3'})
+      ),
+      React.createElement('div', {style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}},
+        React.createElement('div', null,
+          React.createElement('label', {style:S.label}, 'Épreuve'),
+          React.createElement('input', {style:S.input,value:epreuve,onChange:e=>setEpreuve(e.target.value),placeholder:'1'})
+        ),
+        React.createElement('div', null,
+          React.createElement('label', {style:S.label}, 'Set'),
+          React.createElement('input', {style:S.input,value:set,onChange:e=>setSet(e.target.value),placeholder:'1'})
+        )
+      )
+    ),
+
+    glasses.map((g,i)=>
+      React.createElement('div', {key:g.id, style:{...S.cardAmber,position:'relative',overflow:'hidden'}},
+        React.createElement('div', {style:S.watermark}, g.id),
+        React.createElement('div', {style:{position:'relative',zIndex:1}},
+          React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'20px'}},
+            React.createElement('h3', {style:{fontFamily:'Playfair Display,serif',fontSize:'18px',color:'var(--amber)'}}, `Verre ${g.id}`),
+            glasses.length > 1 && React.createElement('button', {style:S.btnDanger,onClick:()=>removeGlass(i)}, '✕')
+          ),
+
+          React.createElement('div', {style:S.row},
+            React.createElement('label', {style:S.label}, 'Type d\'alcool'),
+            React.createElement('select', {style:S.select,value:g.type,onChange:e=>updateGlass(i,'type',e.target.value)},
+              React.createElement('option', {value:''}, 'Choisir…'),
+              TYPES.map(t=>React.createElement('option',{key:t,value:t},t))
+            )
+          ),
+
+          g.type && g.type !== 'Rhum' && React.createElement('div', {style:S.row},
+            React.createElement('label', {style:S.label}, 'Appellation / Typicité'),
+            React.createElement('select', {style:S.select,value:g.appellation,onChange:e=>updateGlass(i,'appellation',e.target.value)},
+              React.createElement('option', {value:''}, 'Choisir…'),
+              SPIRIT_DATA[g.type].appellations.map(a=>React.createElement('option',{key:a,value:a},a))
+            )
+          ),
+
+          g.type === 'Rhum' && React.createElement(React.Fragment, null,
+            React.createElement('div', {style:S.row},
+              React.createElement('label', {style:S.label}, 'Territoire d\'origine (13 pts)'),
+              React.createElement('select', {style:S.select,value:g.rhum_territory,onChange:e=>updateGlass(i,'rhum_territory',e.target.value)},
+                React.createElement('option', {value:''}, 'Choisir…'),
+                SPIRIT_DATA['Rhum'].territories.map(t=>React.createElement('option',{key:t,value:t},t))
+              )
+            ),
+            React.createElement('div', {style:S.row},
+              React.createElement('label', {style:S.label}, 'Matière première (7 pts)'),
+              React.createElement('div', {style:S.pillRow},
+                SPIRIT_DATA['Rhum'].matieres.map(m=>
+                  React.createElement('button', {key:m,style:S.pill(g.rhum_matiere===m),onClick:()=>updateGlass(i,'rhum_matiere',m)},m)
+                )
+              )
+            )
+          ),
+
+          React.createElement('div', {style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'18px'}},
+            React.createElement('div', null,
+              React.createElement('label', {style:S.label}, 'Titrage (% vol)'),
+              React.createElement('input', {type:'number',step:'0.5',style:S.input,value:g.titrage,onChange:e=>updateGlass(i,'titrage',e.target.value),placeholder:'40.0'})
+            ),
+            React.createElement('div', null,
+              React.createElement('label', {style:S.label}, 'Âge sous bois (ans)'),
+              React.createElement('input', {type:'number',style:S.input,value:g.age,onChange:e=>updateGlass(i,'age',e.target.value),placeholder:'12'})
+            )
+          ),
+
+          React.createElement('div', {style:S.row},
+            React.createElement('label', {style:S.label}, 'Producteur (10 pts)'),
+            React.createElement('input', {style:S.input,value:g.producteur,onChange:e=>updateGlass(i,'producteur',e.target.value),placeholder:'Ex : Hine, Bruichladdich…'})
+          ),
+
+          React.createElement('div', {style:S.row},
+            React.createElement('label', {style:S.label}, 'Référence exacte (30 pts)'),
+            React.createElement('input', {style:S.input,value:g.reference,onChange:e=>updateGlass(i,'reference',e.target.value),placeholder:'Ex : Hine Antique XO'})
+          )
+        )
+      )
+    ),
+
+    React.createElement('button', {style:{...S.btnSecondary,marginBottom:'16px'},onClick:addGlass}, '+ Ajouter un verre'),
+    React.createElement('button', {
+      style:{...S.btnPrimary,opacity:glasses.some(g=>!g.type)?0.5:1},
+      disabled:glasses.some(g=>!g.type),
+      onClick:save
+    }, 'Créer la session →')
+  );
+}
+
+// SESSION ADMIN DETAIL
+function SessionDetailView({session, onScore, onBack, onDelete}) {
+  const [tab, setTab] = useState('glasses');
+  const tabStyle = (active) => ({
+    flex:1, padding:'10px', background:'none', border:'none',
+    borderBottom: active ? '2px solid var(--amber)' : '2px solid transparent',
+    color: active ? 'var(--amber)' : 'var(--text2)', fontSize:'13px', letterSpacing:'0.05em',cursor:'pointer'
+  });
+
+  return React.createElement('div', {style:S.pageWide},
+    React.createElement('div', {style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'8px'}},
+      React.createElement('button', {style:{...S.navBtn,border:'none'},onClick:onBack}, '← Retour'),
+      React.createElement('h2', {style:{fontFamily:'Playfair Display,serif',fontSize:'22px',flex:1}}, session.name)
+    ),
+    React.createElement('p', {style:{fontSize:'13px',color:'var(--text2)',marginBottom:'20px'}},
+      `Épreuve ${session.epreuve||'?'} — Set ${session.set||'?'} · ${session.glasses.length} verre${session.glasses.length!==1?'s':''}`
+    ),
+
+    React.createElement('div', {style:{display:'flex',borderBottom:'1px solid var(--border)',marginBottom:'20px'}},
+      React.createElement('button', {style:tabStyle(tab==='glasses'),onClick:()=>setTab('glasses')}, 'VERRES'),
+      React.createElement('button', {style:tabStyle(tab==='tasters'),onClick:()=>setTab('tasters')}, `DÉGUSTATEURS (${session.responses?.length||0})`),
+      React.createElement('button', {style:tabStyle(tab==='scoring'),onClick:()=>setTab('scoring')}, 'SCORING')
+    ),
+
+    tab === 'glasses' && React.createElement('div', null,
+      session.glasses.map(g=>
+        React.createElement('div', {key:g.id,style:S.card},
+          React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}},
+            React.createElement('span', {style:{fontFamily:'Playfair Display,serif',fontSize:'16px',color:'var(--amber)'}}, `Verre ${g.id}`),
+            React.createElement('span', {style:{fontSize:'12px',color:'var(--text2)'}}, g.type||'—')
+          ),
+          React.createElement('div', {style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',fontSize:'13px'}},
+            React.createElement('div', null, React.createElement('span',{style:{color:'var(--text3)'}}, 'Appellation : '),
+              g.type==='Rhum' ? `${g.rhum_territory||'—'} / ${g.rhum_matiere||'—'}` : (g.appellation||'—')),
+            React.createElement('div', null, React.createElement('span',{style:{color:'var(--text3)'}}, 'Titrage : '), g.titrage ? `${g.titrage}%` : '—'),
+            React.createElement('div', null, React.createElement('span',{style:{color:'var(--text3)'}}, 'Âge : '), g.age ? `${g.age} ans` : '—'),
+            React.createElement('div', null, React.createElement('span',{style:{color:'var(--text3)'}}, 'Producteur : '), g.producteur||'—'),
+            React.createElement('div', {style:{gridColumn:'1/-1'}}, React.createElement('span',{style:{color:'var(--text3)'}}, 'Référence : '), g.reference||'—')
+          )
+        )
+      ),
+      React.createElement('button', {style:{...S.btnDanger,marginTop:'8px'},onClick:()=>{if(confirm('Supprimer cette session ?'))onDelete(session.id);}}, 'Supprimer la session')
+    ),
+
+    tab === 'tasters' && React.createElement('div', null,
+      (session.responses||[]).length === 0
+        ? React.createElement('p', {style:{color:'var(--text3)',textAlign:'center',fontSize:'14px',marginTop:'40px'}}, 'Aucun dégustateur pour l\'instant.')
+        : (session.responses||[]).map(r=>
+          React.createElement('div', {key:r.tasterId,style:S.card},
+            React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+              React.createElement('span', {style:{fontFamily:'Playfair Display,serif',fontSize:'16px'}}, r.tasterName),
+              React.createElement('span', {style:{fontSize:'13px',color:'var(--amber)'}},
+                r.scored ? `${computeTotal(r,session.glasses)} / ${105*session.glasses.length} pts` : 'En cours…'
+              )
+            )
+          )
+        )
+    ),
+
+    tab === 'scoring' && React.createElement('div', null,
+      (session.responses||[]).length === 0
+        ? React.createElement('p', {style:{color:'var(--text3)',textAlign:'center',fontSize:'14px',marginTop:'40px'}}, 'Aucun dégustateur à scorer.')
+        : (session.responses||[]).map(r=>
+          React.createElement('div', {key:r.tasterId,style:{...S.card,marginBottom:'20px'}},
+            React.createElement('h3', {style:{fontFamily:'Playfair Display,serif',marginBottom:'16px'}}, r.tasterName),
+            session.glasses.map(g=>
+              React.createElement('div', {key:g.id,style:{marginBottom:'20px'}},
+                React.createElement('div', {style:{fontSize:'13px',color:'var(--amber)',marginBottom:'10px',fontWeight:500}}, `Verre ${g.id}`),
+                React.createElement(ScoreReveal, {
+                  show:true,label:'Type d\'alcool',
+                  pts:scoreType(g.type,r.answers?.[g.id]?.type),max:10,
+                  correct:g.type,tasterVal:r.answers?.[g.id]?.type
+                }),
+                g.type==='Rhum'
+                  ? React.createElement(React.Fragment,null,
+                    React.createElement(ScoreReveal,{show:true,label:'Territoire (13 pts)',
+                      pts:r.answers?.[g.id]?.rhum_territory===g.rhum_territory?13:0,max:13,
+                      correct:g.rhum_territory,tasterVal:r.answers?.[g.id]?.rhum_territory}),
+                    React.createElement(ScoreReveal,{show:true,label:'Matière (7 pts)',
+                      pts:r.answers?.[g.id]?.rhum_matiere===g.rhum_matiere?7:0,max:7,
+                      correct:g.rhum_matiere,tasterVal:r.answers?.[g.id]?.rhum_matiere})
+                  )
+                  : React.createElement(ScoreReveal,{show:true,label:'Appellation',
+                    pts:scoreAppellation(g.appellation,r.answers?.[g.id]?.appellation),max:20,
+                    correct:g.appellation,tasterVal:r.answers?.[g.id]?.appellation}),
+                React.createElement(ScoreReveal,{show:true,label:'Titrage',
+                  pts:scoreTitrage(g.titrage,r.answers?.[g.id]?.titrage),max:20,
+                  correct:`${g.titrage}%`,tasterVal:r.answers?.[g.id]?.titrage?`${r.answers[g.id].titrage}%`:undefined}),
+                React.createElement(ScoreReveal,{show:true,label:'Âge sous bois',
+                  pts:scoreAge(g.age,r.answers?.[g.id]?.age),max:15,
+                  correct:`${g.age} ans`,tasterVal:r.answers?.[g.id]?.age?`${r.answers[g.id].age} ans`:undefined}),
+
+                // Producteur — admin scores
+                React.createElement('div',{style:{marginBottom:'16px'}},
+                  React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px'}},
+                    React.createElement('span',{style:{fontSize:'13px',color:'var(--text2)'}},'Producteur'),
+                    React.createElement('span',{style:{fontSize:'12px',color:'var(--text3)'}}, `Réponse : ${r.answers?.[g.id]?.producteur||'—'} · Correct : ${g.producteur||'—'}`)
+                  ),
+                  React.createElement('div',{style:{display:'flex',gap:'8px'}},
+                    React.createElement('button',{
+                      style:{...S.pill(r.answers?.[g.id]?.producteur_ok===true)},
+                      onClick:()=>onScore(r.tasterId,g.id,'producteur_ok',true)
+                    },'✓ Correct (10 pts)'),
+                    React.createElement('button',{
+                      style:{...S.pill(r.answers?.[g.id]?.producteur_ok===false)},
+                      onClick:()=>onScore(r.tasterId,g.id,'producteur_ok',false)
+                    },'✗ Faux')
+                  )
+                ),
+
+                // Référence — admin scores
+                React.createElement('div',{style:{marginBottom:'8px'}},
+                  React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px'}},
+                    React.createElement('span',{style:{fontSize:'13px',color:'var(--text2)'}},'Référence supposée'),
+                    React.createElement('span',{style:{fontSize:'12px',color:'var(--text3)'}}, `Réponse : ${r.answers?.[g.id]?.reference||'—'} · Correct : ${g.reference||'—'}`)
+                  ),
+                  React.createElement('div',{style:{display:'flex',gap:'8px'}},
+                    React.createElement('button',{
+                      style:{...S.pill(r.answers?.[g.id]?.reference_ok===true)},
+                      onClick:()=>onScore(r.tasterId,g.id,'reference_ok',true)
+                    },'✓ Correct (30 pts)'),
+                    React.createElement('button',{
+                      style:{...S.pill(r.answers?.[g.id]?.reference_ok===false)},
+                      onClick:()=>onScore(r.tasterId,g.id,'reference_ok',false)
+                    },'✗ Faux')
+                  )
+                )
+              )
+            ),
+            React.createElement('div',{style:{borderTop:'1px solid var(--border)',paddingTop:'14px',display:'flex',justifyContent:'space-between',alignItems:'center'}},
+              React.createElement('span',{style:{fontWeight:500}},'Score total'),
+              React.createElement('span',{style:{fontFamily:'Playfair Display,serif',fontSize:'22px',color:'var(--amber)'}},
+                `${computeTotalFull(r,session.glasses)} pts`
+              )
+            )
+          )
+        )
+    )
+  );
+}
+
+function computeTotal(r, glasses) {
+  return glasses.reduce((tot,g)=>{
+    const a = r.answers?.[g.id];
+    if(!a) return tot;
+    return tot + scoreType(g.type,a.type) + scoreAppellation(g.appellation,a.appellation) + scoreTitrage(g.titrage,a.titrage) + scoreAge(g.age,a.age);
+  },0);
+}
+
+function computeTotalFull(r, glasses) {
+  return glasses.reduce((tot,g)=>{
+    const a = r.answers?.[g.id];
+    if(!a) return tot;
+    let s = scoreType(g.type,a.type) + scoreTitrage(g.titrage,a.titrage) + scoreAge(g.age,a.age);
+    if(g.type==='Rhum'){
+      s += a.rhum_territory===g.rhum_territory?13:0;
+      s += a.rhum_matiere===g.rhum_matiere?7:0;
+    } else {
+      s += scoreAppellation(g.appellation,a.appellation);
+    }
+    s += a.producteur_ok===true?10:0;
+    s += a.reference_ok===true?30:0;
+    return tot+s;
+  },0);
+}
+
+// TASTING FORM
+function TastingView({session, tasterName, tasterId, savedAnswers, onSave, onFinish, onBack}) {
+  const [glassIdx, setGlassIdx] = useState(0);
+  const [answers, setAnswers] = useState(savedAnswers || {});
+  const [submitted, setSubmitted] = useState(false);
+  const glass = session.glasses[glassIdx];
+  const total = session.glasses.length;
+  const ans = answers[glass.id] || {};
+
+  function update(field, val) {
+    setAnswers(prev=>{
+      const updated = {...prev,[glass.id]:{...(prev[glass.id]||{}),[field]:val}};
+      if(field==='type'){
+        updated[glass.id].appellation='';
+        updated[glass.id].rhum_territory='';
+        updated[glass.id].rhum_matiere='';
+      }
+      onSave(updated);
+      return updated;
+    });
+  }
+
+  function next() {
+    if(glassIdx < total-1) setGlassIdx(i=>i+1);
+    else {
+      setSubmitted(true);
+      onFinish(answers);
+    }
+  }
+  function prev() { if(glassIdx>0) setGlassIdx(i=>i-1); }
+
+  if(submitted) return React.createElement('div', {style:{...S.page,textAlign:'center',paddingTop:'80px'}},
+    React.createElement('div', {style:{fontSize:'48px',marginBottom:'16px'}}, '🥃'),
+    React.createElement('h2', {style:{fontFamily:'Playfair Display,serif',fontSize:'28px',color:'var(--amber)',marginBottom:'12px'}}, 'Formulaire envoyé !'),
+    React.createElement('p', {style:{color:'var(--text2)',marginBottom:'32px'}}, 'L\'admin corrigera les résultats sous peu.'),
+    React.createElement('button', {style:S.btnSecondary,onClick:onBack}, '← Retour à l\'accueil')
+  );
+
+  const selectedType = ans.type || '';
+  const isRhum = selectedType === 'Rhum';
+  const appellations = selectedType && !isRhum ? SPIRIT_DATA[selectedType]?.appellations : [];
+
+  return React.createElement('div', {style:S.page},
+    // Header
+    React.createElement('div', {style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'16px'}},
+      React.createElement('button', {style:{...S.navBtn,border:'none'},onClick:onBack}, '← Accueil'),
+      React.createElement('div', {style:{flex:1,textAlign:'center'}},
+        React.createElement('p', {style:{fontSize:'12px',color:'var(--text2)',letterSpacing:'0.1em'}}, tasterName.toUpperCase()),
+        React.createElement('p', {style:{fontSize:'11px',color:'var(--text3)'}}, `${session.name}`)
+      )
+    ),
+
+    // Progress
+    React.createElement('div', {style:{display:'flex',gap:'4px',marginBottom:'24px'}},
+      session.glasses.map((_,i)=>
+        React.createElement('div', {
+          key:i,
+          style:{flex:1,height:'3px',borderRadius:'2px',
+            background:i<glassIdx?'var(--amber)':i===glassIdx?'var(--amber-light)':'var(--border)'}
+        })
+      )
+    ),
+
+    // Card
+    React.createElement('div', {style:{...S.cardAmber,position:'relative',overflow:'hidden'}},
+      React.createElement('div', {style:S.watermark}, glass.id),
+      React.createElement('div', {style:{position:'relative',zIndex:1}},
+        React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'24px'}},
+          React.createElement('h2', {style:{fontFamily:'Playfair Display,serif',fontSize:'26px',color:'var(--amber)'}}, `Verre ${glass.id}`),
+          React.createElement('span', {style:{fontSize:'13px',color:'var(--text2)'}}, `${glassIdx+1} / ${total}`)
+        ),
+
+        // Type
+        React.createElement('div', {style:S.row},
+          React.createElement('label', {style:S.label}, 'Type d\'alcool — 10 pts'),
+          React.createElement('div', {style:{...S.pillRow,gap:'6px'}},
+            TYPES.map(t=>React.createElement('button',{key:t,style:{...S.pill(ans.type===t),fontSize:'12px',padding:'7px 11px'},onClick:()=>update('type',t)},t))
+          )
+        ),
+
+        // Appellation
+        selectedType && !isRhum && React.createElement('div', {style:S.row},
+          React.createElement('label', {style:S.label}, 'Appellation / Typicité — 20 pts'),
+          React.createElement('div', {style:{...S.pillRow,gap:'6px'}},
+            appellations.map(a=>React.createElement('button',{key:a,style:{...S.pill(ans.appellation===a),fontSize:'12px',padding:'7px 11px'},onClick:()=>update('appellation',a)},a))
+          )
+        ),
+
+        // Rhum special
+        isRhum && React.createElement(React.Fragment, null,
+          React.createElement('div', {style:S.row},
+            React.createElement('label', {style:S.label}, 'Territoire d\'origine — 13 pts'),
+            React.createElement('div', {style:{...S.pillRow,gap:'6px'}},
+              SPIRIT_DATA['Rhum'].territories.map(t=>React.createElement('button',{key:t,style:{...S.pill(ans.rhum_territory===t),fontSize:'12px',padding:'7px 11px'},onClick:()=>update('rhum_territory',t)},t))
+            )
+          ),
+          React.createElement('div', {style:S.row},
+            React.createElement('label', {style:S.label}, 'Matière première — 7 pts'),
+            React.createElement('div', {style:S.pillRow},
+              SPIRIT_DATA['Rhum'].matieres.map(m=>React.createElement('button',{key:m,style:S.pill(ans.rhum_matiere===m),onClick:()=>update('rhum_matiere',m)},m))
+            )
+          )
+        ),
+
+        // Titrage
+        React.createElement('div', {style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'18px'}},
+          React.createElement('div', null,
+            React.createElement('label', {style:S.label}, 'Titrage estimé — 20 pts'),
+            React.createElement('input', {
+              type:'number',step:'0.5',min:0,max:100,
+              style:S.input,value:ans.titrage||'',
+              onChange:e=>update('titrage',e.target.value),
+              placeholder:'% vol'
+            })
+          ),
+          React.createElement('div', null,
+            React.createElement('label', {style:S.label}, 'Âge sous bois — 15 pts'),
+            React.createElement('input', {
+              type:'number',min:0,
+              style:S.input,value:ans.age||'',
+              onChange:e=>update('age',e.target.value),
+              placeholder:'ans'
+            })
+          )
+        ),
+
+        // Producteur
+        React.createElement('div', {style:S.row},
+          React.createElement('label', {style:S.label}, 'Producteur supposé — 10 pts'),
+          React.createElement('input', {style:S.input,value:ans.producteur||'',onChange:e=>update('producteur',e.target.value),placeholder:'Nom du producteur…'})
+        ),
+
+        // Référence
+        React.createElement('div', {style:{...S.row,marginBottom:0}},
+          React.createElement('label', {style:S.label}, 'Référence supposée — 30 pts'),
+          React.createElement('input', {style:S.input,value:ans.reference||'',onChange:e=>update('reference',e.target.value),placeholder:'Ex : Glenfarclas 21 ans…'})
+        )
+      )
+    ),
+
+    // Nav buttons
+    React.createElement('div', {style:{display:'flex',gap:'10px',marginTop:'8px'}},
+      glassIdx > 0 && React.createElement('button', {style:{...S.btnSecondary,flex:'0 0 80px'},onClick:prev}, '← Préc.'),
+      React.createElement('button', {style:{...S.btnPrimary,flex:1},onClick:next},
+        glassIdx < total-1 ? `Verre suivant →` : '✓ Envoyer mes réponses'
+      )
+    )
+  );
+}
+
+// ─── APP ────────────────────────────────────────────────────────────────────
+
+function App() {
+  const [view, setView] = useState('home');
+  const [sessions, setSessions] = useState([]);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [tasterName, setTasterName] = useState('');
+  const [tasterId] = useState(()=>'t_'+Math.random().toString(36).slice(2));
+
+  // Poll sessions from server every 3 seconds
+  useEffect(()=>{
+    function poll(){ api('/api/sessions').then(d=>{ if(d) setSessions(d); }); }
+    poll();
+    const id = setInterval(poll, 3000);
+    return ()=>clearInterval(id);
+  },[]);
+
+  const currentSession = sessions.find(s=>s.id===currentSessionId);
+
+  function createSession(sess) {
+    api('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sess)})
+      .then(()=>setView('admin'));
+  }
+
+  function deleteSession(id) {
+    api(`/api/sessions/${id}`,{method:'DELETE'}).then(()=>setView('admin'));
+  }
+
+  function joinSession(sessionId, name) {
+    setCurrentSessionId(sessionId);
+    setTasterName(name);
+    api(`/api/sessions/${sessionId}/responses/${tasterId}`,{
+      method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tasterName:name,answers:{},submitted:false})
+    }).then(()=>setView('tasting'));
+  }
+
+  function saveAnswers(ans) {
+    api(`/api/sessions/${currentSessionId}/responses/${tasterId}`,{
+      method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({answers:ans})
+    });
+  }
+
+  function finishTasting(ans) {
+    api(`/api/sessions/${currentSessionId}/responses/${tasterId}`,{
+      method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({answers:ans,submitted:true})
+    });
+  }
+
+  function adminScore(tasterId2, glassId, field, val) {
+    api(`/api/sessions/${currentSessionId}/score`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tasterId:tasterId2,glassId,field,val})
+    });
+  }
+
+  const tasterAnswers = currentSession?.responses?.find(r=>r.tasterId===tasterId)?.answers;
+
+  return React.createElement('div', {style:S.app},
+    React.createElement('nav', {style:S.nav},
+      React.createElement(Logo),
+      view !== 'home' && React.createElement('span', {style:{fontSize:'11px',color:'var(--text3)'}},
+        view==='admin'||view==='create'||view==='sessionDetail' ? 'Admin' : tasterName
+      )
+    ),
+    view==='home' && React.createElement(HomeView,{onGo:setView}),
+    view==='admin' && React.createElement(AdminView,{sessions,onNewSession:()=>setView('create'),onOpenSession:(id)=>{setCurrentSessionId(id);setView('sessionDetail');},onBack:()=>setView('home')}),
+    view==='create' && React.createElement(CreateSessionView,{onSave:createSession,onBack:()=>setView('admin')}),
+    view==='sessionDetail' && currentSession && React.createElement(SessionDetailView,{session:currentSession,onScore:adminScore,onBack:()=>setView('admin'),onDelete:deleteSession}),
+    view==='join' && React.createElement(JoinView,{sessions,onJoin:joinSession,onBack:()=>setView('home')}),
+    view==='tasting' && currentSession && React.createElement(TastingView,{
+      session:currentSession,tasterName,tasterId,
+      savedAnswers:tasterAnswers,
+      onSave:saveAnswers,onFinish:finishTasting,
+      onBack:()=>setView('home')
+    })
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>

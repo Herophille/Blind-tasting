@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nginx -v)",
+      "Bash(mkdir -p ~/.config/systemd/user)",
+      "Read(//home/distillerie/.config/systemd/**)",
+      "Bash(systemctl --user daemon-reload)",
+      "Bash(systemctl --user enable tasting.service)",
+      "Bash(systemctl --user start tasting.service)",
+      "Bash(systemctl --user status tasting.service --no-pager)",
+      "Bash(loginctl enable-linger *)",
+      "Bash(loginctl show-user *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/blind_tasting.html)",
+      "Bash(systemctl --user restart tasting.service)",
+      "Bash(curl -s http://localhost:8080/api/sessions)",
+      "Bash(curl -s -o /dev/null -w \"HTML: %{http_code}\" http://localhost:8080/)",
+      "Bash(python3 -c \"import playwright\")",
+      "Read(//usr/bin/**)",
+      "Read(//snap/**)"
+    ]
+  }
+}
