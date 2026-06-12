@@ -715,7 +715,7 @@ function App() {
 
   // Poll sessions from server every 3 seconds
   useEffect(()=>{
-    function poll(){ api('/api/sessions').then(d=>{ if(d) setSessions(d); }); }
+    function poll(){ api('/api/sessions').then(d=>{ if(Array.isArray(d)) setSessions(d); }); }
     poll();
     const id = setInterval(poll, 3000);
     return ()=>clearInterval(id);
