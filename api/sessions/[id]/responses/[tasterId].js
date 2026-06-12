@@ -5,6 +5,7 @@ module.exports = async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'PUT') return res.status(405).json({ error: 'Method not allowed' });
+  if (!supabase) return res.status(503).json({ error: 'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars' });
 
   const { id, tasterId } = req.query;
   const update = req.body;

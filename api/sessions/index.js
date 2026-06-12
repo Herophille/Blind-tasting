@@ -4,6 +4,7 @@ const setCors = require('../../lib/cors');
 module.exports = async (req, res) => {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(204).end();
+  if (!supabase) return res.status(503).json({ error: 'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars' });
 
   if (req.method === 'GET') {
     const { data, error } = await supabase
