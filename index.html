@@ -258,6 +258,7 @@ function CreateSessionView({onSave, onBack}) {
   const [name, setName] = useState('');
   const [epreuve, setEpreuve] = useState('');
   const [set, setSet] = useState('');
+  const [timer, setTimer] = useState('');
   const [glasses, setGlasses] = useState([makeGlass(1)]);
 
   function makeGlass(n) {
@@ -284,6 +285,7 @@ function CreateSessionView({onSave, onBack}) {
       id: Date.now().toString(),
       name: name || `Session ${new Date().toLocaleDateString('fr-FR')}`,
       epreuve, set, glasses,
+      timer: timer ? parseInt(timer) : 0,
       responses:[], createdAt: Date.now()
     };
     onSave(session);
@@ -309,6 +311,10 @@ function CreateSessionView({onSave, onBack}) {
           React.createElement('label', {style:S.label}, 'Set'),
           React.createElement('input', {style:S.input,value:set,onChange:e=>setSet(e.target.value),placeholder:'1'})
         )
+      ),
+      React.createElement('div', {style:{marginTop:'12px'}},
+        React.createElement('label', {style:S.label}, 'Timer (minutes, optionnel)'),
+        React.createElement('input', {type:'number',min:1,style:S.input,value:timer,onChange:e=>setTimer(e.target.value),placeholder:'Sans limite'})
       )
     ),
 
@@ -555,13 +561,30 @@ function computeTotalFull(r, glasses) {
 }
 
 // TASTING FORM
-function TastingView({session, tasterName, tasterId, savedAnswers, onSave, onFinish, onBack}) {
+function TastingView({session, tasterName, tasterId, savedAnswers, startTime, onSave, onFinish, onBack}) {
   const [glassIdx, setGlassIdx] = useState(0);
   const [answers, setAnswers] = useState(savedAnswers || {});
   const [submitted, setSubmitted] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(null);
   const glass = session.glasses[glassIdx];
-  const total = session.glasses.length;
   const ans = answers[glass.id] || {};
+  const hasTimer = !!(session.timer && session.timer > 0 && startTime);
+
+  useEffect(()=>{
+    if(!hasTimer) return;
+    const totalMs = session.timer * 60 * 1000;
+    function tick(){
+      const remaining = Math.max(0, Math.ceil((totalMs - (Date.now() - startTime)) / 1000));
+      setTimeLeft(remaining);
+    }
+    tick();
+    const id = setInterval(tick, 1000);
+    return ()=>clearInterval(id);
+  },[hasTimer, startTime, session.timer]);
+
+  useEffect(()=>{
+    if(timeLeft === 0 && !submitted){ setSubmitted(true); onFinish(answers); }
+  },[timeLeft]);
 
   function update(field, val) {
     setAnswers(prev=>{
@@ -576,14 +599,9 @@ function TastingView({session, tasterName, tasterId, savedAnswers, onSave, onFin
     });
   }
 
-  function next() {
-    if(glassIdx < total-1) setGlassIdx(i=>i+1);
-    else {
-      setSubmitted(true);
-      onFinish(answers);
-    }
-  }
-  function prev() { if(glassIdx>0) setGlassIdx(i=>i-1); }
+  function finish() { setSubmitted(true); onFinish(answers); }
+
+  function formatTime(s){ return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
 
   if(submitted) return React.createElement('div', {style:{...S.page,textAlign:'center',paddingTop:'80px'}},
     React.createElement('div', {style:{fontSize:'48px',marginBottom:'16px'}}, '🥃'),
@@ -595,6 +613,7 @@ function TastingView({session, tasterName, tasterId, savedAnswers, onSave, onFin
   const selectedType = ans.type || '';
   const isRhum = selectedType === 'Rhum';
   const appellations = selectedType && !isRhum ? SPIRIT_DATA[selectedType]?.appellations : [];
+  const timerWarning = timeLeft !== null && timeLeft < 300;
 
   return React.createElement('div', {style:S.page},
     // Header
@@ -603,28 +622,30 @@ function TastingView({session, tasterName, tasterId, savedAnswers, onSave, onFin
       React.createElement('div', {style:{flex:1,textAlign:'center'}},
         React.createElement('p', {style:{fontSize:'12px',color:'var(--text2)',letterSpacing:'0.1em'}}, tasterName.toUpperCase()),
         React.createElement('p', {style:{fontSize:'11px',color:'var(--text3)'}}, `${session.name}`)
-      )
+      ),
+      hasTimer && timeLeft !== null && React.createElement('div', {
+        style:{fontFamily:'Playfair Display,serif',fontSize:'20px',fontWeight:700,color:timerWarning?'var(--danger)':'var(--amber)',minWidth:'64px',textAlign:'right'}
+      }, formatTime(timeLeft))
     ),
 
-    // Progress
-    React.createElement('div', {style:{display:'flex',gap:'4px',marginBottom:'24px'}},
-      session.glasses.map((_,i)=>
-        React.createElement('div', {
-          key:i,
-          style:{flex:1,height:'3px',borderRadius:'2px',
-            background:i<glassIdx?'var(--amber)':i===glassIdx?'var(--amber-light)':'var(--border)'}
-        })
-      )
+    // Glass selector
+    React.createElement('div', {style:{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'20px'}},
+      session.glasses.map((g,i)=>{
+        const isActive = i===glassIdx;
+        const isFilled = !!(answers[g.id]?.type);
+        return React.createElement('button',{
+          key:g.id,
+          style:{...S.pill(isActive),...(isFilled&&!isActive?{borderColor:'var(--amber-dim)',color:'var(--amber)'}:{})},
+          onClick:()=>setGlassIdx(i)
+        }, isFilled&&!isActive ? `✓ Verre ${g.id}` : `Verre ${g.id}`);
+      })
     ),
 
     // Card
     React.createElement('div', {style:{...S.cardAmber,position:'relative',overflow:'hidden'}},
       React.createElement('div', {style:S.watermark}, glass.id),
       React.createElement('div', {style:{position:'relative',zIndex:1}},
-        React.createElement('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'24px'}},
-          React.createElement('h2', {style:{fontFamily:'Playfair Display,serif',fontSize:'26px',color:'var(--amber)'}}, `Verre ${glass.id}`),
-          React.createElement('span', {style:{fontSize:'13px',color:'var(--text2)'}}, `${glassIdx+1} / ${total}`)
-        ),
+        React.createElement('h2', {style:{fontFamily:'Playfair Display,serif',fontSize:'26px',color:'var(--amber)',marginBottom:'24px'}}, `Verre ${glass.id}`),
 
         // Type
         React.createElement('div', {style:S.row},
@@ -694,13 +715,8 @@ function TastingView({session, tasterName, tasterId, savedAnswers, onSave, onFin
       )
     ),
 
-    // Nav buttons
-    React.createElement('div', {style:{display:'flex',gap:'10px',marginTop:'8px'}},
-      glassIdx > 0 && React.createElement('button', {style:{...S.btnSecondary,flex:'0 0 80px'},onClick:prev}, '← Préc.'),
-      React.createElement('button', {style:{...S.btnPrimary,flex:1},onClick:next},
-        glassIdx < total-1 ? `Verre suivant →` : '✓ Envoyer mes réponses'
-      )
-    )
+    // Submit
+    React.createElement('button', {style:{...S.btnPrimary,marginTop:'8px'},onClick:finish}, '✓ Envoyer mes réponses')
   );
 }
 
@@ -712,6 +728,7 @@ function App() {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [tasterName, setTasterName] = useState('');
   const [tasterId] = useState(()=>'t_'+Math.random().toString(36).slice(2));
+  const [tastingStartTime, setTastingStartTime] = useState(null);
 
   // Poll sessions from server every 3 seconds
   useEffect(()=>{
@@ -733,11 +750,13 @@ function App() {
   }
 
   function joinSession(sessionId, name) {
+    const now = Date.now();
     setCurrentSessionId(sessionId);
     setTasterName(name);
+    setTastingStartTime(now);
     api(`/api/sessions/${sessionId}/responses/${tasterId}`,{
       method:'PUT',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tasterName:name,answers:{},submitted:false})
+      body:JSON.stringify({tasterName:name,answers:{},submitted:false,startTime:now})
     }).then(()=>setView('tasting'));
   }
 
@@ -779,6 +798,7 @@ function App() {
     view==='tasting' && currentSession && React.createElement(TastingView,{
       session:currentSession,tasterName,tasterId,
       savedAnswers:tasterAnswers,
+      startTime:tastingStartTime,
       onSave:saveAnswers,onFinish:finishTasting,
       onBack:()=>setView('home')
     })
